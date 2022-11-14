@@ -1,10 +1,30 @@
+import { Field, Form, Formik } from "formik";
 import { type NextPage } from "next";
-import { signIn, signOut, useSession } from "next-auth/react";
 import Head from "next/head";
+import { useRouter } from "next/router";
+import { useState } from "react";
+import { PlaylistItem } from "../components/PlaylistItem";
 
 import { trpc } from "../utils/trpc";
 
 const Home: NextPage = () => {
+  const router = useRouter();
+
+  const [searchTerm, setSearchTerm] = useState<string | null>(null);
+
+  const { data, isLoading } = trpc.spotify.search.useQuery(
+    { query: searchTerm ?? "" },
+    {
+      enabled: searchTerm !== null,
+      onError: ({ data, message }) => {
+        if (data?.code === "UNAUTHORIZED")
+          return router.replace("/api/auth/login");
+
+        console.log(message);
+      },
+    }
+  );
+
   return (
     <>
       <Head>
@@ -16,41 +36,44 @@ const Home: NextPage = () => {
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      <main className="container mx-auto flex min-h-screen flex-col items-center justify-center p-4">
-        <h1>Hello world</h1>
+      <main className="container mx-auto min-h-screen p-4">
+        <h1 className="text-xl">Spotify to YouTube</h1>
 
-        <AuthShowcase />
+        <Formik
+          initialValues={{ search: "" }}
+          onSubmit={(data) => setSearchTerm(data.search)}
+        >
+          {() => (
+            <Form className="flex gap-2">
+              <Field
+                name="search"
+                className="w-full flex-1 rounded-lg border border-gray-200 px-4 py-2 pr-12 text-sm shadow-sm"
+                required
+                placeholder="Enter your search query..."
+              />
+
+              <button
+                type="submit"
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm shadow-sm"
+              >
+                Search
+              </button>
+            </Form>
+          )}
+        </Formik>
+
+        {isLoading && searchTerm !== null ? <h2>Loading...</h2> : null}
+
+        {data?.playlists && data?.playlists?.items.length > 0 && (
+          <ul className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {data.playlists.items.map((playlist) => (
+              <PlaylistItem key={playlist.id} playlist={playlist} />
+            ))}
+          </ul>
+        )}
       </main>
     </>
   );
 };
 
 export default Home;
-
-const AuthShowcase: React.FC = () => {
-  const { data: sessionData } = useSession();
-
-  const { data } = trpc.auth.getSecretMessage.useQuery(
-    undefined, // no input
-    { enabled: sessionData?.user !== undefined }
-  );
-
-  return (
-    <div className="flex flex-col items-center justify-center gap-2">
-      {sessionData && (
-        <p className="text-2xl text-blue-500">
-          Logged in as {sessionData?.user?.name}
-        </p>
-      )}
-
-      {data && <pre>{JSON.stringify(data, null, 2)}</pre>}
-
-      <button
-        className="rounded-md border border-black bg-violet-50 px-4 py-2 text-xl shadow-lg hover:bg-violet-100"
-        onClick={sessionData ? () => signOut() : () => signIn()}
-      >
-        {sessionData ? "Sign out" : "Sign in"}
-      </button>
-    </div>
-  );
-};
