@@ -3,7 +3,9 @@ import axios from "axios";
 import { z } from "zod";
 import { env } from "../../../env/server.mjs";
 import type { Playlist, SpotifyList } from "../../../types/spotify-api";
+import type { SearchListResponse } from "../../../types/youtube-api.js";
 import { spotifyApi } from "../../../utils/spotify-api";
+import { youtubeApi } from "../../../utils/youtubeApi";
 import { prisma } from "../../db/client";
 import { protectedProcedure, router } from "../trpc";
 
@@ -81,6 +83,45 @@ export const spotifyRouter = router({
           message: error.response?.data?.error?.message ?? error.message,
         });
       }
+    }),
+  convertToYoutube: protectedProcedure
+    .input(z.object({ playlistId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user } = ctx.session;
+      const token = await getUserAccessToken(user.id);
+      const { data: spotifyData } = await spotifyApi(token).get<Playlist>(
+        `/playlists/${input.playlistId}`
+      );
+
+      if (!spotifyData.tracks.items && !spotifyData.tracks.items)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Playlist is empty",
+        });
+
+      const songsUrl: { song: string; url: string }[] = [];
+
+      await Promise.all(
+        spotifyData.tracks.items.map(async (item) => {
+          const q = `${item.track.name} ${item.track.artists[0]?.name}`;
+
+          const { data: youtubeData } =
+            await youtubeApi.get<SearchListResponse>("/search", {
+              params: { q, part: "snippet", maxResults: 1 },
+            });
+
+          if (youtubeData.items[0]) {
+            songsUrl.push({
+              song: item.track.name,
+              url: `https://www.youtube.com/watch?v=${youtubeData.items[0].id.videoId}`,
+            });
+          }
+
+          return youtubeData;
+        })
+      );
+
+      return songsUrl;
     }),
   getUserPlaylists: protectedProcedure.query(async ({ ctx }) => {
     const { user } = ctx.session;
