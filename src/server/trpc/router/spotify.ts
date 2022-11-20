@@ -89,6 +89,7 @@ export const spotifyRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { user } = ctx.session;
       const token = await getUserAccessToken(user.id);
+
       const { data: spotifyData } = await spotifyApi(token).get<Playlist>(
         `/playlists/${input.playlistId}`
       );
@@ -103,21 +104,38 @@ export const spotifyRouter = router({
 
       await Promise.all(
         spotifyData.tracks.items.map(async (item) => {
-          const q = `${item.track.name} ${item.track.artists[0]?.name}`;
+          // Check if the song is saved on the db
+          const song = await prisma.song.findFirst({
+            where: { spotifyId: item.track.id },
+          });
 
+          if (song)
+            return songsUrl.push({
+              song: item.track.name,
+              url: `https://www.youtube.com/watch?v=${song.youtubeId}`,
+            });
+
+          // If it's not saved on the db, search on youtube
+          const q = `${item.track.name} ${item.track.artists[0]?.name}`;
           const { data: youtubeData } =
             await youtubeApi.get<SearchListResponse>("/search", {
               params: { q, part: "snippet", maxResults: 1 },
             });
 
-          if (youtubeData.items[0]) {
-            songsUrl.push({
-              song: item.track.name,
-              url: `https://www.youtube.com/watch?v=${youtubeData.items[0].id.videoId}`,
-            });
-          }
+          if (!youtubeData.items[0]) return;
 
-          return youtubeData;
+          songsUrl.push({
+            song: item.track.name,
+            url: `https://www.youtube.com/watch?v=${youtubeData.items[0].id.videoId}`,
+          });
+
+          return await prisma.song.create({
+            data: {
+              name: item.track.name,
+              spotifyId: item.track.id,
+              youtubeId: youtubeData.items[0].id.videoId,
+            },
+          });
         })
       );
 
