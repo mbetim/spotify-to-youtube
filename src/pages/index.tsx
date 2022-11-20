@@ -3,15 +3,20 @@ import { type NextPage } from "next";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { useState } from "react";
+import { useDialog } from "../components/dialog";
+import { UrlsListDialog } from "../components/UrlsListDialog";
 import { PlaylistItem } from "../components/PlaylistItem";
+import type { Playlist } from "../types/spotify-api";
 
 import { trpc } from "../utils/trpc";
 
 const Home: NextPage = () => {
   const router = useRouter();
+  const urlsListDialog = useDialog<{ song: string; url: string }[]>();
 
   const [searchTerm, setSearchTerm] = useState<string | null>(null);
 
+  const generateMutation = trpc.spotify.convertToYoutube.useMutation();
   const { data, isLoading } = trpc.spotify.search.useQuery(
     { query: searchTerm ?? "" },
     {
@@ -24,6 +29,19 @@ const Home: NextPage = () => {
       },
     }
   );
+
+  const handleCardClick = async (playlist: Playlist) => {
+    try {
+      const response = await generateMutation.mutateAsync({
+        playlistId: playlist.id,
+      });
+
+      urlsListDialog.open(response);
+    } catch (error) {
+      alert("Something went wrong!");
+      console.log(error);
+    }
+  };
 
   return (
     <>
@@ -67,11 +85,21 @@ const Home: NextPage = () => {
         {data?.playlists && data?.playlists?.items.length > 0 && (
           <ul className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {data.playlists.items.map((playlist) => (
-              <PlaylistItem key={playlist.id} playlist={playlist} />
+              <PlaylistItem
+                key={playlist.id}
+                playlist={playlist}
+                onClick={() => handleCardClick(playlist)}
+              />
             ))}
           </ul>
         )}
       </main>
+
+      <UrlsListDialog
+        isOpen={urlsListDialog.isOpen}
+        onClose={urlsListDialog.close}
+        songs={urlsListDialog.data ?? []}
+      />
     </>
   );
 };
